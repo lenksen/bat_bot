@@ -135,7 +135,8 @@ std::optional<std::filesystem::path> PickManualTarget(const Services& services, 
     if (auto picked = ui::PickFolder(initial); picked.has_value()) {
         return ValidateTargetRoot(*picked);
     }
-    const std::wstring raw = services.ui->PromptLine(L"请输入体验服目标目录路径: ");
+    services.ui->Info(L"你可以手动输入“英雄联盟体验服”目录，或直接输入其中的 Game 目录。");
+    const std::wstring raw = services.ui->PromptLine(L"请输入体验服目录路径：");
     if (raw.empty()) return std::nullopt;
     return ValidateTargetRoot(raw);
 }
@@ -143,6 +144,10 @@ std::optional<std::filesystem::path> PickManualTarget(const Services& services, 
 // 返回空 path 不是失败，而是一个约定信号：
 // 表示用户在候选列表界面选择了“改为手动选择目录”。
 std::filesystem::path ResolveFromCandidates(const Services& services, const std::vector<std::filesystem::path>& candidates, const std::wstring& title, const std::wstring& source, const std::filesystem::path& initial) {
+    services.logger->Debug(L"候选目录数量: " + std::to_wstring(candidates.size()));
+    for (const auto& candidate : candidates) {
+        services.logger->Debug(L"候选目录: " + candidate.wstring());
+    }
     auto choice = services.ui->PromptCandidateChoice(candidates, title);
     if (!choice.has_value()) return {};
     if (choice->empty()) {
@@ -176,34 +181,44 @@ void CleanupOldWorkDirs(const std::filesystem::path& root, const std::filesystem
 }
 
 std::filesystem::path ResolveTargetRoot(const Services& services) {
-    services.ui->Step(L"检查 config.ini 中记录的上次目标目录");
+    services.ui->Status(L"正在检查上次使用的目录...");
     const ConfigValues config = ConfigStore::Load(services.app.configFile);
     if (config.lastPath.has_value()) {
+        services.logger->Debug(L"config.ini last_path: " + config.lastPath->wstring());
+    } else {
+        services.logger->Debug(L"config.ini last_path: <empty>");
+    }
+    if (config.lastPath.has_value()) {
         if (auto valid = ValidateTargetRoot(*config.lastPath)) {
-            services.ui->Info(valid->wstring());
+            services.ui->Success(L"已找到上次使用的目录");
             services.logger->Info(L"目标搜索完成，来源=config.ini，路径=" + valid->wstring());
             return *valid;
         }
-        services.ui->Warn(L"config.ini 中的 last_path 已失效: " + config.lastPath->wstring());
+        services.ui->Warn(L"上次使用的目录已失效：" + config.lastPath->wstring());
     } else {
-        services.ui->Info(L"last_path 为空，继续自动搜索体验服目录。");
+        services.ui->Info(L"未找到上次使用记录，继续自动搜索。");
     }
 
     const auto drives = GetFixedDriveObjects();
+    services.logger->Debug(L"固定磁盘数量: " + std::to_wstring(drives.size()));
+    for (const auto& drive : drives) {
+        services.logger->Debug(L"磁盘: root=" + drive.rootPath.wstring() + L", isSystem=" + std::to_wstring(drive.isSystem ? 1 : 0));
+    }
     if (drives.empty()) {
-        throw AppError("未检测到可用的固定磁盘。");
+        throw AppError("未检测到可用的本地磁盘，无法继续查找体验服目录。");
     }
 
     // 搜索顺序是刻意设计的：
     // 优先使用命中率高且成本低的检查，再逐步进入更重的递归搜索。
-    services.ui->Step(L"检查常见体验服路径");
+    services.ui->Status(L"正在检查常见安装路径...");
     std::vector<std::filesystem::path> commonHits;
     for (const auto& candidate : GetCommonCandidateRoots(drives)) {
+        services.logger->Debug(L"检查常见路径: " + candidate.wstring());
         if (auto valid = ValidateTargetRoot(candidate)) commonHits.push_back(*valid);
     }
     commonHits = UniqueOrdered(commonHits);
     if (!commonHits.empty()) {
-        auto resolved = ResolveFromCandidates(services, commonHits, L"发现以下体验服目录候选：", L"common-path", config.lastPath.value_or(services.app.exeDir));
+        auto resolved = ResolveFromCandidates(services, commonHits, L"选择体验服目录", L"common-path", config.lastPath.value_or(services.app.exeDir));
         if (!resolved.empty()) return resolved;
     }
 
@@ -212,64 +227,70 @@ std::filesystem::path ResolveTargetRoot(const Services& services) {
         if (!drive.isSystem) nonSystemDrives.push_back(drive);
     }
     if (nonSystemDrives.empty()) {
-        services.ui->Warn(L"未发现非系统盘，将跳过体验服目录浅搜索。");
+        services.ui->Warn(L"未发现非系统盘，将跳过额外自动搜索。");
     } else {
-        services.ui->Step(L"自动搜索非系统盘中的体验服目录");
+        services.ui->Status(L"正在自动搜索其他磁盘中的体验服目录...");
         std::vector<std::filesystem::path> weGameRoots;
         for (const auto& drive : nonSystemDrives) {
-            services.ui->Info(L"正在搜索 " + drive.rootPath.wstring());
+            services.ui->Info(L"正在检查磁盘 " + drive.rootPath.wstring());
             auto found = FindWeGameAppsShallow(drive.rootPath, 3);
+            services.logger->Debug(L"磁盘浅搜索命中数量: drive=" + drive.rootPath.wstring() + L", count=" + std::to_wstring(found.size()));
             weGameRoots.insert(weGameRoots.end(), found.begin(), found.end());
         }
         weGameRoots = UniqueOrdered(weGameRoots);
+        services.logger->Debug(L"WeGameApps 根目录命中数量: " + std::to_wstring(weGameRoots.size()));
 
         if (!weGameRoots.empty()) {
             // 一旦已知 WeGameApps 根目录，就优先检查标准子路径，
             // 因为这是最符合常见安装布局的命中方式。
-            services.ui->Step(L"优先检查已找到路径下的英雄联盟体验服目录");
+            services.ui->Status(L"正在检查已找到目录下的体验服安装位置...");
             std::vector<std::filesystem::path> directHits;
             for (const auto& root : weGameRoots) {
                 if (auto valid = ValidateTargetRoot(root / constants::kGameName)) directHits.push_back(*valid);
             }
             directHits = UniqueOrdered(directHits);
+            services.logger->Debug(L"标准子路径命中数量: " + std::to_wstring(directHits.size()));
             if (!directHits.empty()) {
-                auto resolved = ResolveFromCandidates(services, directHits, L"发现以下可直接使用的体验服目录：", L"direct-under-wegameapps", config.lastPath.value_or(services.app.exeDir));
+                auto resolved = ResolveFromCandidates(services, directHits, L"选择体验服目录", L"direct-under-wegameapps", config.lastPath.value_or(services.app.exeDir));
                 if (!resolved.empty()) return resolved;
             }
 
-            services.ui->Step(L"执行有限深度搜索");
+            services.ui->Status(L"正在执行进一步搜索...");
             std::vector<std::filesystem::path> limitedHits;
             for (const auto& root : weGameRoots) {
                 auto found = FindLolLimitedDepth(root, 2);
                 limitedHits.insert(limitedHits.end(), found.begin(), found.end());
             }
             limitedHits = UniqueOrdered(limitedHits);
+            services.logger->Debug(L"有限深度命中数量: " + std::to_wstring(limitedHits.size()));
             if (!limitedHits.empty()) {
-                auto resolved = ResolveFromCandidates(services, limitedHits, L"发现以下体验服目录候选：", L"limited-depth", config.lastPath.value_or(services.app.exeDir));
+                auto resolved = ResolveFromCandidates(services, limitedHits, L"选择体验服目录", L"limited-depth", config.lastPath.value_or(services.app.exeDir));
                 if (!resolved.empty()) return resolved;
             }
 
-            services.ui->Step(L"执行深度兜底搜索");
+            services.ui->Status(L"正在执行完整搜索，这可能需要一点时间...");
             std::vector<std::filesystem::path> deepHits;
             for (const auto& root : weGameRoots) {
                 auto found = FindLolDeepFallback(root);
                 deepHits.insert(deepHits.end(), found.begin(), found.end());
             }
             deepHits = UniqueOrdered(deepHits);
+            services.logger->Debug(L"深度兜底命中数量: " + std::to_wstring(deepHits.size()));
             if (!deepHits.empty()) {
-                auto resolved = ResolveFromCandidates(services, deepHits, L"发现以下深度搜索结果：", L"deep-fallback", config.lastPath.value_or(services.app.exeDir));
+                auto resolved = ResolveFromCandidates(services, deepHits, L"选择体验服目录", L"deep-fallback", config.lastPath.value_or(services.app.exeDir));
                 if (!resolved.empty()) return resolved;
             }
         }
     }
 
     // 手动选择是所有自动搜索策略都失败后的最后兜底方案。
-    services.ui->Step(L"未自动找到体验服目录，请手动选择");
+    services.ui->PromptTitle(L"手动选择目标目录");
+    services.ui->Info(L"未自动找到可用目录，请手动选择体验服目录。");
     if (auto manual = PickManualTarget(services, config.lastPath.value_or(services.app.exeDir))) {
         services.logger->Info(L"目标搜索完成，来源=manual-final，路径=" + manual->wstring());
         return *manual;
     }
-    throw AppError("未选择有效的体验服目标目录。");
+    throw AppError("未选择有效的体验服目录，或所选目录中不存在 Game 文件夹。");
 }
 
 } // namespace wg::fs

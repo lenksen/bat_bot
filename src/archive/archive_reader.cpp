@@ -6,6 +6,8 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "win/encoding.h"
+
 namespace wg::archive {
 
 ArchiveReader::ArchiveReader(const std::filesystem::path& archivePath) : archivePath_(archivePath) {}

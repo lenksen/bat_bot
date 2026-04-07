@@ -28,6 +28,7 @@ std::wstring CurrentTimestamp() {
 
 Logger::Logger(std::filesystem::path path) : path_(std::move(path)) {}
 
+void Logger::Debug(const std::wstring& message) const { Write(L"DEBUG", message); }
 void Logger::Info(const std::wstring& message) const { Write(L"INFO", message); }
 void Logger::Warn(const std::wstring& message) const { Write(L"WARN", message); }
 void Logger::Error(const std::wstring& message) const { Write(L"ERROR", message); }

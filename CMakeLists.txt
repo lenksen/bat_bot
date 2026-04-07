@@ -29,8 +29,6 @@ add_executable(TfBotInjector
     src/win/console.cpp
 )
 
-set_target_properties(TfBotInjector PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/app")
-
 target_include_directories(TfBotInjector PRIVATE src)
 
 find_package(LibArchive REQUIRED)

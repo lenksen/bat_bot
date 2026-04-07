@@ -13,6 +13,7 @@ public:
     explicit Logger(std::filesystem::path path);
 
     // 记录不同级别的日志。
+    void Debug(const std::wstring& message) const;
     void Info(const std::wstring& message) const;
     void Warn(const std::wstring& message) const;
     void Error(const std::wstring& message) const;

@@ -19,6 +19,45 @@ HANDLE GetInHandle() {
     return GetStdHandle(STD_INPUT_HANDLE);
 }
 
+WORD DefaultAttributes() {
+    static WORD attrs = [] {
+        CONSOLE_SCREEN_BUFFER_INFO info{};
+        if (GetConsoleScreenBufferInfo(GetOutHandle(), &info)) {
+            return info.wAttributes;
+        }
+        return static_cast<WORD>(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+    }();
+    return attrs;
+}
+
+WORD ColorAttributes(Color color) {
+    switch (color) {
+    case Color::Dim:
+        return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+    case Color::Accent:
+        return FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+    case Color::Success:
+        return FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+    case Color::Warning:
+        return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+    case Color::Error:
+        return FOREGROUND_RED | FOREGROUND_INTENSITY;
+    case Color::Default:
+    default:
+        return DefaultAttributes();
+    }
+}
+
+void WriteWithColor(Color color, const std::wstring& text) {
+    HANDLE out = GetOutHandle();
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    const bool hasInfo = GetConsoleScreenBufferInfo(out, &info) != 0;
+    SetConsoleTextAttribute(out, ColorAttributes(color));
+    DWORD written = 0;
+    WriteConsoleW(out, text.c_str(), static_cast<DWORD>(text.size()), &written, nullptr);
+    SetConsoleTextAttribute(out, hasInfo ? info.wAttributes : DefaultAttributes());
+}
+
 } // namespace
 
 void InitializeConsole() {
@@ -29,13 +68,37 @@ void InitializeConsole() {
     SetConsoleTitleW(title.c_str());
 }
 
+void ClearScreen() {
+    HANDLE out = GetOutHandle();
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (!GetConsoleScreenBufferInfo(out, &info)) {
+        return;
+    }
+
+    const DWORD cellCount = static_cast<DWORD>(info.dwSize.X) * static_cast<DWORD>(info.dwSize.Y);
+    COORD home{0, 0};
+    DWORD written = 0;
+    FillConsoleOutputCharacterW(out, L' ', cellCount, home, &written);
+    FillConsoleOutputAttribute(out, info.wAttributes, cellCount, home, &written);
+    SetConsoleCursorPosition(out, home);
+}
+
 void Write(const std::wstring& text) {
     DWORD written = 0;
     WriteConsoleW(GetOutHandle(), text.c_str(), static_cast<DWORD>(text.size()), &written, nullptr);
 }
 
+void WriteColored(Color color, const std::wstring& text) {
+    WriteWithColor(color, text);
+}
+
 void WriteLine(const std::wstring& text) {
     Write(text);
+    Write(L"\r\n");
+}
+
+void WriteLineColored(Color color, const std::wstring& text) {
+    WriteWithColor(color, text);
     Write(L"\r\n");
 }
 

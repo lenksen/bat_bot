@@ -1,6 +1,7 @@
 #include "app/application.h"
 
 #include <chrono>
+#include <thread>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
@@ -83,17 +84,39 @@ int RunApplication(const RunOptions& options) {
     try {
         // 主流程刻意保持线性展开，便于阅读和排障。
         // 其顺序直接对应业务步骤：选择注入包、定位目标目录、写入文件、执行后处理。
+        ui.Step(L"注入包");
         const auto archivePath = archive::ResolveArchiveInput(services, options.initialArchivePath);
-        ui.Step(L"已选择BOT注入包");
-        ui.Info(archivePath.wstring());
+        ui.SetContextValue(L"注入包", archivePath.filename().wstring());
+        ui.Info(L"已选择：" + archivePath.wstring());
         logger.Info(L"压缩包文件: " + archivePath.wstring());
 
+        ui.Step(L"目标目录");
         const auto targetRoot = fs::ResolveTargetRoot(services);
-        ui.Step(L"体验服目标目录已确定");
-        ui.Info(targetRoot.wstring());
+        ui.SetContextValue(L"目标目录", targetRoot.wstring());
+        ui.Info(L"当前使用：" + targetRoot.wstring());
 
-        const std::wstring botKey = ui.PromptLine(L"\n请输入 BOT 卡密（直接回车可跳过写入）: ");
+        ui.Step(L"BOT 卡密");
+        const std::wstring botKey = ui.PromptBotKey();
+        if (botKey.empty()) {
+            ui.SetContextValue(L"BOT 卡密", L"已跳过");
+            ui.Info(L"已跳过");
+        } else {
+            ui.SetContextValue(L"BOT 卡密", L"已输入");
+            ui.Info(L"已输入，将在注入后自动写入");
+        }
+
+        ui.Step(L"文件冲突处理");
         const OverwriteMode overwriteMode = ui.PromptOverwriteMode();
+        if (overwriteMode == OverwriteMode::Ask) {
+            ui.SetContextValue(L"冲突处理", L"逐个确认");
+            ui.Info(L"冲突时逐个确认");
+        } else if (overwriteMode == OverwriteMode::Overwrite) {
+            ui.SetContextValue(L"冲突处理", L"全部覆盖");
+            ui.Info(L"发现同名文件时全部覆盖");
+        } else {
+            ui.SetContextValue(L"冲突处理", L"全部跳过");
+            ui.Info(L"发现同名文件时全部跳过");
+        }
 
         const auto manifestFile = app.workDir / L"manifest.txt";
         const auto extractResult = archive::ExtractGameArchiveSubset(services, archivePath, targetRoot, overwriteMode, manifestFile);
@@ -104,16 +127,19 @@ int RunApplication(const RunOptions& options) {
         ConfigStore::Save(app.configFile, config);
         logger.Info(L"已保存 last_path: " + targetRoot.wstring());
 
-        ui.Step(L"注入完成");
-        ui.Info(L"目标 Game 目录: " + extractResult.gameDir.wstring());
-        ui.Info(L"新增文件: " + std::to_wstring(extractResult.stats.added));
-        ui.Info(L"覆盖文件: " + std::to_wstring(extractResult.stats.overwritten));
-        ui.Info(L"跳过文件: " + std::to_wstring(extractResult.stats.skipped));
-        if (!botKey.empty()) {
-            ui.Info(L"写入 BOT 卡密文件数: " + std::to_wstring(postResult.botWritten));
-        }
-        ui.Info(L"DLL 重命名数: " + std::to_wstring(postResult.renamed));
-        ui.Info(L"日志文件: " + app.logFile.wstring());
+        ui.Step(L"结果摘要");
+        ui.Success(L"注入完成");
+        ui.Info(L"本次注入已成功结束，下面是结果摘要。");
+        ui.Info(L"");
+        ui.SummaryLine(L"状态", L"成功");
+        ui.SummaryLine(L"目标目录", extractResult.gameDir.wstring());
+        ui.SummaryLine(L"新增文件", std::to_wstring(extractResult.stats.added));
+        ui.SummaryLine(L"覆盖文件", std::to_wstring(extractResult.stats.overwritten));
+        ui.SummaryLine(L"跳过文件", std::to_wstring(extractResult.stats.skipped));
+        ui.SummaryLine(L"卡密写入", std::to_wstring(postResult.botWritten));
+        ui.SummaryLine(L"DLL 重命名", std::to_wstring(postResult.renamed));
+        ui.SummaryLine(L"日志文件", app.logFile.wstring());
+        std::this_thread::sleep_for(std::chrono::seconds(3));
 
         logger.Info(L"==== 运行成功结束 ====");
         // 临时工作目录只保存本次运行过程中的中间产物和辅助诊断信息。
@@ -122,9 +148,13 @@ int RunApplication(const RunOptions& options) {
         std::filesystem::remove_all(app.workDir, ec);
         return 0;
     } catch (const std::exception& ex) {
-        ui.Error(win::Utf8ToWide(ex.what()));
+        ui.Step(L"结果摘要");
+        ui.Error(L"注入失败");
+        ui.Info(L"失败原因：");
+        ui.Info(win::Utf8ToWide(ex.what()));
+        ui.Info(L"日志文件：" + app.logFile.wstring());
+        std::this_thread::sleep_for(std::chrono::seconds(3));
         logger.Error(win::Utf8ToWide(ex.what()));
-        ui.Info(L"日志文件: " + app.logFile.wstring());
         // 失败路径同样尝试清理临时工作目录，避免留下无意义的中间文件。
         // 这里也不能让清理失败覆盖原始业务错误。
         std::error_code ec;
