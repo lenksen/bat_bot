@@ -90,6 +90,8 @@ int RunApplication(const RunOptions& options) {
         ui.Info(L"已选择：" + archivePath.wstring());
         logger.Info(L"压缩包文件: " + archivePath.wstring());
 
+        const auto archiveEntries = archive::ValidateArchive(services, archivePath);
+
         ui.Step(L"目标目录");
         const auto targetRoot = fs::ResolveTargetRoot(services);
         ui.SetContextValue(L"目标目录", targetRoot.wstring());
@@ -119,7 +121,7 @@ int RunApplication(const RunOptions& options) {
         }
 
         const auto manifestFile = app.workDir / L"manifest.txt";
-        const auto extractResult = archive::ExtractGameArchiveSubset(services, archivePath, targetRoot, overwriteMode, manifestFile);
+        const auto extractResult = archive::ExtractGameArchiveSubset(services, archivePath, archiveEntries, targetRoot, overwriteMode, manifestFile);
         const auto postResult = postprocess::Run(services, extractResult.manifest, botKey);
 
         ConfigValues config;

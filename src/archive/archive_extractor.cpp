@@ -29,6 +29,19 @@ bool IsSupportedArchive(const std::filesystem::path& path) {
     return ext == ".zip" || ext == ".rar";
 }
 
+bool HasTargetSubset(const std::vector<ArchiveEntry>& entries) {
+    const std::string prefix = "league of legends/";
+    for (const auto& entry : entries) {
+        std::string normalized = entry.pathUtf8;
+        std::replace(normalized.begin(), normalized.end(), '\\', '/');
+        const std::string lowered = ToLowerAscii(normalized);
+        if (lowered.rfind(prefix, 0) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 std::filesystem::path ResolveArchiveInput(const Services& services, const std::optional<std::filesystem::path>& initialArchive) {
@@ -58,10 +71,23 @@ std::filesystem::path ResolveArchiveInput(const Services& services, const std::o
     return std::filesystem::absolute(candidate);
 }
 
-ExtractResult ExtractGameArchiveSubset(const Services& services, const std::filesystem::path& archivePath, const std::filesystem::path& targetRoot, OverwriteMode overwriteMode, const std::filesystem::path& manifestFile) {
+std::vector<ArchiveEntry> ValidateArchive(const Services& services, const std::filesystem::path& archivePath) {
     services.ui->Step(L"压缩包检查");
     services.ui->Status(L"正在检查压缩包内容...");
     services.logger->Debug(L"开始检查压缩包: " + archivePath.wstring());
+
+    ArchiveReader reader(archivePath);
+    const auto entries = reader.ListEntries();
+    services.logger->Debug(L"归档条目数量: " + std::to_wstring(entries.size()));
+    if (!HasTargetSubset(entries)) {
+        throw AppError("压缩包中未找到有效目录：league of legends/。");
+    }
+
+    services.ui->Success(L"已识别有效目录：league of legends/");
+    return entries;
+}
+
+ExtractResult ExtractGameArchiveSubset(const Services& services, const std::filesystem::path& archivePath, const std::vector<ArchiveEntry>& entries, const std::filesystem::path& targetRoot, OverwriteMode overwriteMode, const std::filesystem::path& manifestFile) {
     services.logger->Debug(L"目标根目录: " + targetRoot.wstring());
 
     const auto gameDir = targetRoot / constants::kGameDirName;
@@ -71,7 +97,6 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
     services.logger->Debug(L"目标 Game 目录: " + gameDir.wstring());
 
     ArchiveReader reader(archivePath);
-    const auto entries = reader.ListEntries();
     services.logger->Debug(L"归档条目数量: " + std::to_wstring(entries.size()));
     // 当前产品不是通用解压器。
     // 业务规则要求只把 league of legends/ 子树映射到目标 Game 目录。
@@ -83,7 +108,6 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
     ExtractResult result;
     result.gameDir = gameDir;
 
-    bool foundSubset = false;
     bool writeStarted = false;
     for (const auto& entry : entries) {
         std::string normalized = entry.pathUtf8;
@@ -94,7 +118,6 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
             continue;
         }
 
-        foundSubset = true;
         services.logger->Debug(L"命中目标前缀条目: " + win::Utf8ToWide(normalized));
         const std::string relative = normalized.substr(prefix.size());
         if (relative.empty()) {
@@ -139,10 +162,6 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
         // manifest 是后续所有改动的唯一边界。
         // 只有真正写入成功的文件才允许进入后处理阶段。
         result.manifest.push_back(destination);
-    }
-
-    if (!foundSubset) {
-        throw AppError("压缩包中未找到有效目录：league of legends/。");
     }
 
     if (!writeStarted) {
