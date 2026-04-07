@@ -15,6 +15,8 @@ namespace wg::archive {
 
 namespace {
 
+// 归档前缀规则固定为英文路径，因此这里使用 ASCII 范围的小写转换即可。
+// 这样能用最简单的方式实现大小写不敏感比较。
 std::string ToLowerAscii(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
@@ -31,6 +33,8 @@ bool IsSupportedArchive(const std::filesystem::path& path) {
 
 std::filesystem::path ResolveArchiveInput(const Services& services, const std::optional<std::filesystem::path>& initialArchive) {
     std::filesystem::path candidate;
+    // 输入来源按优先级依次为：命令行启动参数、原生文件选择框、控制台手工输入。
+    // 这样既兼容自动化调用，也兼容普通用户双击运行。
     if (initialArchive.has_value()) {
         candidate = *initialArchive;
     } else if (auto picked = ui::PickArchiveFile(services.app.exeDir); picked.has_value()) {
@@ -59,6 +63,8 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
 
     ArchiveReader reader(archivePath);
     const auto entries = reader.ListEntries();
+    // 当前产品不是通用解压器。
+    // 业务规则要求只把 league of legends/ 子树映射到目标 Game 目录。
     const std::string prefix = "league of legends/";
 
     OverwriteState overwriteState;
@@ -84,6 +90,8 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
 
         const auto destination = fs::BuildSafeDestinationPath(gameDir, relative);
         if (entry.isDirectory || (!normalized.empty() && normalized.back() == '/')) {
+            // 目录条目只负责建立目录结构。
+            // 后处理只关心文件，因此目录不会写入 manifest。
             std::filesystem::create_directories(destination);
             continue;
         }
@@ -101,6 +109,8 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
         } else {
             result.stats.added++;
         }
+        // manifest 是后续所有改动的唯一边界。
+        // 只有真正写入成功的文件才允许进入后处理阶段。
         result.manifest.push_back(destination);
     }
 
@@ -113,6 +123,7 @@ ExtractResult ExtractGameArchiveSubset(const Services& services, const std::file
     for (const auto& item : result.manifest) {
         lines.push_back(item.wstring());
     }
+    // 将本次实际写入的文件落盘保存，便于排障、人工核对和理解后处理边界。
     win::WriteLinesUtf8(manifestFile, lines, true);
 
     services.logger->Info(L"注入包写入完成: 新增=" + std::to_wstring(result.stats.added) + L"，覆盖=" + std::to_wstring(result.stats.overwritten) + L"，跳过=" + std::to_wstring(result.stats.skipped));

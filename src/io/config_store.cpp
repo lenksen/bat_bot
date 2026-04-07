@@ -13,6 +13,8 @@ ConfigValues ConfigStore::Load(const std::filesystem::path& path) {
         return values;
     }
 
+    // 配置格式刻意保持简单：
+    // 允许注释行，忽略未知键，缺失值则自然回退到默认行为。
     for (const auto& line : io::ReadLines(path)) {
         if (line.empty() || line[0] == L'#' || line[0] == L';') {
             continue;
@@ -36,6 +38,7 @@ void ConfigStore::Save(const std::filesystem::path& path, const ConfigValues& va
     if (values.lastPath.has_value()) {
         lines.push_back(L"last_path=" + values.lastPath->wstring());
     }
+    // 使用带 BOM 的 UTF-8 保存，保证 Windows 常见文本工具打开时中文路径不会乱码。
     win::WriteLinesUtf8(path, lines, true);
 }
 

@@ -39,6 +39,8 @@ std::optional<std::filesystem::path> ValidateTargetRoot(const std::filesystem::p
     }
 
     auto normalized = *full;
+    // 文件夹选择时，用户很容易直接选到 Game 目录。
+    // 但程序内部统一以“体验服根目录”作为标准输入，因此在这里集中归一化。
     if (normalized.filename() == constants::kGameDirName) {
         normalized = normalized.parent_path();
     }
@@ -75,6 +77,8 @@ std::filesystem::path BuildSafeDestinationPath(const std::filesystem::path& base
     if (relative.empty()) {
         throw AppError("archive entry path is empty");
     }
+    // 先显式拦截明显的 .. 穿越输入，
+    // 再在与基目录拼接并规范化后做一次最终边界校验，确保目标仍然在 Game 目录内部。
     if (relative.find(L"..\\") != std::wstring::npos || relative == L"..") {
         throw AppError(win::WideToUtf8(L"压缩包条目包含非法相对路径: " + relative));
     }

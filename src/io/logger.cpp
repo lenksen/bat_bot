@@ -11,6 +11,7 @@ namespace wg {
 
 namespace {
 
+// 日志时间戳精确到毫秒，便于和外部操作、文件写入时序对照。
 std::wstring CurrentTimestamp() {
     const auto now = std::chrono::system_clock::now();
     const auto tt = std::chrono::system_clock::to_time_t(now);
@@ -36,6 +37,7 @@ const std::filesystem::path& Logger::path() const noexcept { return path_; }
 void Logger::Write(const std::wstring& level, const std::wstring& message) const {
     std::ofstream output(path_, std::ios::binary | std::ios::app);
     if (!output) {
+        // 日志写入失败不能阻塞主流程。
         return;
     }
     const std::wstring line = L"[" + CurrentTimestamp() + L"] [" + level + L"] " + message + L"\r\n";

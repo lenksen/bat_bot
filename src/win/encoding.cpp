@@ -10,6 +10,7 @@ namespace wg::win {
 
 namespace {
 
+// UTF-8 文本读取共用的底层二进制读取函数。
 std::string ReadBinary(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
@@ -44,6 +45,8 @@ std::wstring Utf8ToWide(const std::string& value) {
 
 std::string ReadTextFileUtf8(const std::filesystem::path& path) {
     std::string bytes = ReadBinary(path);
+    // 同时兼容带 BOM 和不带 BOM 的 UTF-8 文件，
+    // 让配置文件和 manifest 文件的读取更稳健。
     if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF && static_cast<unsigned char>(bytes[1]) == 0xBB && static_cast<unsigned char>(bytes[2]) == 0xBF) {
         return bytes.substr(3);
     }

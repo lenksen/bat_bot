@@ -9,6 +9,8 @@ namespace wg::ui {
 
 namespace {
 
+// 小型 RAII 封装，确保 COM 只在一次对话框调用期间初始化，
+// 函数退出时能够自动成对释放。
 class ComInit {
 public:
     ComInit() : hr_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)) {}
@@ -18,6 +20,8 @@ private:
     HRESULT hr_;
 };
 
+// 文件选择和目录选择共用的底层实现。
+// 返回 nullopt 表示用户取消、对话框不可用或初始化失败。
 std::optional<std::filesystem::path> ShowDialog(bool pickFolder, const std::filesystem::path& initialDirectory) {
     ComInit com;
     if (FAILED(com.hr())) {
@@ -46,6 +50,8 @@ std::optional<std::filesystem::path> ShowDialog(bool pickFolder, const std::file
     }
 
     if (!initialDirectory.empty() && std::filesystem::exists(initialDirectory)) {
+        // 初始目录只是一个 best-effort 建议值。
+        // 即使这里无法转成 shell item，也不应该导致整个对话框失败。
         IShellItem* folder = nullptr;
         if (SUCCEEDED(SHCreateItemFromParsingName(initialDirectory.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
             dialog->SetDefaultFolder(folder);

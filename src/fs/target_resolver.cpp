@@ -20,6 +20,8 @@ namespace wg::fs {
 
 namespace {
 
+// 枚举本机固定磁盘，并把非系统盘排在前面。
+// 体验服更常安装在非系统盘，优先搜索这些磁盘通常更高效。
 std::vector<DriveObject> GetFixedDriveObjects() {
     std::vector<DriveObject> out;
     const DWORD mask = GetLogicalDrives();
@@ -42,6 +44,8 @@ std::vector<DriveObject> GetFixedDriveObjects() {
     return out;
 }
 
+// 先检查常见安装路径。
+// 这是自动搜索中成本最低的一步，应该优先于递归遍历。
 std::vector<std::filesystem::path> GetCommonCandidateRoots(const std::vector<DriveObject>& drives) {
     std::vector<std::filesystem::path> candidates;
     for (const auto& drive : drives) {
@@ -55,6 +59,8 @@ std::vector<std::filesystem::path> GetCommonCandidateRoots(const std::vector<Dri
     return UniqueOrdered(candidates);
 }
 
+// 安全地枚举一个目录下的子目录。
+// 权限不足、损坏路径或其他枚举异常都只影响当前分支，不中断整体搜索。
 std::vector<std::filesystem::path> EnumerateDirectoriesSafe(const std::filesystem::path& path) {
     std::vector<std::filesystem::path> out;
     std::error_code ec;
@@ -67,6 +73,8 @@ std::vector<std::filesystem::path> EnumerateDirectoriesSafe(const std::filesyste
     return out;
 }
 
+// 在有限深度内优先寻找 WeGameApps 根目录。
+// 找到后，后续更深层的搜索就可以聚焦在这些目录下面，避免整盘暴力扫描。
 std::vector<std::filesystem::path> FindWeGameAppsShallow(const std::filesystem::path& root, int maxDepth) {
     std::vector<std::filesystem::path> found;
     std::queue<std::pair<std::filesystem::path, int>> q;
@@ -85,6 +93,8 @@ std::vector<std::filesystem::path> FindWeGameAppsShallow(const std::filesystem::
     return UniqueOrdered(found);
 }
 
+// 在已发现的 WeGameApps 根目录下继续做有限深度搜索。
+// 这是标准子路径直查失败后的第二层自动搜索策略。
 std::vector<std::filesystem::path> FindLolLimitedDepth(const std::filesystem::path& root, int maxDepth) {
     std::vector<std::filesystem::path> found;
     std::queue<std::pair<std::filesystem::path, int>> q;
@@ -103,6 +113,8 @@ std::vector<std::filesystem::path> FindLolLimitedDepth(const std::filesystem::pa
     return UniqueOrdered(found);
 }
 
+// 在 WeGameApps 范围内执行最终深度兜底搜索。
+// 这一阶段开销最大，因此有意放到最后执行。
 std::vector<std::filesystem::path> FindLolDeepFallback(const std::filesystem::path& root) {
     std::vector<std::filesystem::path> found;
     std::stack<std::filesystem::path> st;
@@ -118,6 +130,7 @@ std::vector<std::filesystem::path> FindLolDeepFallback(const std::filesystem::pa
     return UniqueOrdered(found);
 }
 
+// 手动输入路径时仍然复用自动搜索使用的同一套合法性校验规则。
 std::optional<std::filesystem::path> PickManualTarget(const Services& services, const std::filesystem::path& initial) {
     if (auto picked = ui::PickFolder(initial); picked.has_value()) {
         return ValidateTargetRoot(*picked);
@@ -127,6 +140,8 @@ std::optional<std::filesystem::path> PickManualTarget(const Services& services, 
     return ValidateTargetRoot(raw);
 }
 
+// 返回空 path 不是失败，而是一个约定信号：
+// 表示用户在候选列表界面选择了“改为手动选择目录”。
 std::filesystem::path ResolveFromCandidates(const Services& services, const std::vector<std::filesystem::path>& candidates, const std::wstring& title, const std::wstring& source, const std::filesystem::path& initial) {
     auto choice = services.ui->PromptCandidateChoice(candidates, title);
     if (!choice.has_value()) return {};
@@ -146,6 +161,8 @@ std::filesystem::path ResolveFromCandidates(const Services& services, const std:
 void CleanupOldWorkDirs(const std::filesystem::path& root, const std::filesystem::path& current) {
     std::error_code ec;
     if (!std::filesystem::is_directory(root, ec)) return;
+    // 工作目录只属于临时运行产物。
+    // 这里只保留当前运行和较新的历史目录，过旧目录做 best-effort 清理。
     const auto cutoff = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
     for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
         if (ec) break;
@@ -177,6 +194,8 @@ std::filesystem::path ResolveTargetRoot(const Services& services) {
         throw AppError("未检测到可用的固定磁盘。");
     }
 
+    // 搜索顺序是刻意设计的：
+    // 优先使用命中率高且成本低的检查，再逐步进入更重的递归搜索。
     services.ui->Step(L"检查常见体验服路径");
     std::vector<std::filesystem::path> commonHits;
     for (const auto& candidate : GetCommonCandidateRoots(drives)) {
@@ -205,6 +224,8 @@ std::filesystem::path ResolveTargetRoot(const Services& services) {
         weGameRoots = UniqueOrdered(weGameRoots);
 
         if (!weGameRoots.empty()) {
+            // 一旦已知 WeGameApps 根目录，就优先检查标准子路径，
+            // 因为这是最符合常见安装布局的命中方式。
             services.ui->Step(L"优先检查已找到路径下的英雄联盟体验服目录");
             std::vector<std::filesystem::path> directHits;
             for (const auto& root : weGameRoots) {
@@ -242,6 +263,7 @@ std::filesystem::path ResolveTargetRoot(const Services& services) {
         }
     }
 
+    // 手动选择是所有自动搜索策略都失败后的最后兜底方案。
     services.ui->Step(L"未自动找到体验服目录，请手动选择");
     if (auto manual = PickManualTarget(services, config.lastPath.value_or(services.app.exeDir))) {
         services.logger->Info(L"目标搜索完成，来源=manual-final，路径=" + manual->wstring());

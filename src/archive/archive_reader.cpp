@@ -12,6 +12,8 @@ ArchiveReader::ArchiveReader(const std::filesystem::path& archivePath) : archive
 
 std::vector<ArchiveEntry> ArchiveReader::ListEntries() const {
     std::vector<ArchiveEntry> out;
+    // 每次操作都重新创建 reader，使这个封装保持无状态，
+    // 避免跨函数共享 libarchive 状态导致行为不透明。
     struct archive* ar = archive_read_new();
     archive_read_support_filter_all(ar);
     archive_read_support_format_all(ar);
@@ -46,6 +48,8 @@ void ArchiveReader::ExtractFileTo(const std::string& entryPathUtf8, const std::f
 
     archive_entry* entry = nullptr;
     bool matched = false;
+    // 这里通过重新扫描归档定位目标条目。
+    // 虽然不是随机访问实现，但逻辑简单清晰，且对当前一次性注入流程足够可控。
     while (archive_read_next_header(ar, &entry) == ARCHIVE_OK) {
         const char* path = archive_entry_pathname_utf8(entry);
         if (!path) path = archive_entry_pathname(entry);

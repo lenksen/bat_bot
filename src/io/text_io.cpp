@@ -7,6 +7,8 @@
 namespace wg::io {
 
 std::vector<std::wstring> ReadLines(const std::filesystem::path& path) {
+    // 上层配置解析和路径处理主要使用宽字符串，
+    // 因此这里在读入 UTF-8 后立即转换为宽字符，避免后续重复转换。
     const std::string utf8 = win::ReadTextFileUtf8(path);
     const std::wstring wide = win::Utf8ToWide(utf8);
     std::wstringstream ss(wide);

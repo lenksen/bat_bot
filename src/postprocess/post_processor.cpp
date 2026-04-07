@@ -13,6 +13,8 @@ PostProcessResult Run(const Services& services, const std::vector<std::filesyste
     services.ui->Step(L"执行注入后处理");
     PostProcessResult result;
 
+    // 后处理严格以 manifest 为边界，而不是重新扫描整个 Game 目录。
+    // 这样可以避免误处理那些在本次运行中被跳过的旧文件。
     for (const auto& file : manifest) {
         if (!std::filesystem::is_regular_file(file)) {
             continue;
@@ -23,6 +25,8 @@ PostProcessResult Run(const Services& services, const std::vector<std::filesyste
         }
     }
 
+    // 重命名单独放在第二轮执行。
+    // 这样前一轮处理 user.ini 时仍然面对原始文件名，最终再统一调整 DLL 命名。
     for (const auto& file : manifest) {
         if (!std::filesystem::is_regular_file(file)) {
             continue;

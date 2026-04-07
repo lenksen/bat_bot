@@ -22,6 +22,7 @@ HANDLE GetInHandle() {
 } // namespace
 
 void InitializeConsole() {
+    // 强制控制台输入输出使用 UTF-8，保证中文提示和粘贴路径时的行为一致。
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
     const std::wstring title(constants::kAppTitle.begin(), constants::kAppTitle.end());
@@ -44,6 +45,8 @@ std::wstring ReadLine() {
     if (!ReadConsoleW(GetInHandle(), buffer, static_cast<DWORD>(std::size(buffer) - 1), &read, nullptr)) {
         return {};
     }
+    // ReadConsoleW 会把换行一起读回来，这里统一裁掉，
+    // 让上层永远得到干净的一行输入文本。
     std::wstring line(buffer, buffer + read);
     while (!line.empty() && (line.back() == L'\n' || line.back() == L'\r')) {
         line.pop_back();
